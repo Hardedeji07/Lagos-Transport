@@ -1,0 +1,30 @@
+{
+  "expo": {
+    "name": "smartroute-app",
+    "slug": "smartroute-app",
+    "version": "1.0.0",
+    "scheme": "smartroutelagos",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "package": "com.user.smartroutelagos"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    }
+  }
+}

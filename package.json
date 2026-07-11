@@ -1,0 +1,21 @@
+{
+  "name": "smartroute-app",
+  "version": "1.0.0",
+  "main": "index.js",
+  "dependencies": {
+    "expo": "~57.0.1",
+    "expo-dev-client": "~57.0.4",
+    "expo-status-bar": "~57.0.0",
+    "react": "19.2.3",
+    "react-native": "0.86.0"
+  },
+  "scripts": {
+    "start": "expo start --go",
+    "android": "expo start --android",
+    "ios": "expo start --ios"
+  },
+  "private": true,
+  "devDependencies": {
+    "@expo/ngrok": "^4.1.3"
+  }
+}

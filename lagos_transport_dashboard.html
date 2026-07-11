@@ -1,0 +1,2017 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GoSlow · Lagos Traffic Predictor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  :root{
+    --bg:#0D1319;
+    --bg-elevated:#141C24;
+    --panel:#182129;
+    --panel-border:#232E38;
+    --text:#EDEFF2;
+    --text-dim:#8A93A3;
+    --text-faint:#5B6572;
+    --accent:#FFC93C;
+    --accent-dim:#8C7128;
+    --accent2:#6EE7D8;
+    --accent2-dim:#2C6B64;
+    --low:#3ECF8E;
+    --medium:#F5A623;
+    --high:#FF8A3D;
+    --severe:#FF4757;
+    --line:#2A3540;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;padding:0;background:var(--bg);}
+  body{
+    font-family:'Inter',sans-serif;
+    color:var(--text);
+    display:flex;
+    justify-content:center;
+    min-height:100vh;
+  }
+  .frame{
+    width:100%;
+    max-width:420px;
+    min-height:100vh;
+    background:var(--bg);
+    display:flex;
+    flex-direction:column;
+    position:relative;
+    overflow:hidden;
+  }
+  .ambient-blob{
+    position:absolute;
+    border-radius:50%;
+    filter:blur(60px);
+    pointer-events:none;
+    opacity:0.5;
+    z-index:0;
+  }
+  .ambient-blob.b1{
+    width:280px; height:280px;
+    top:-120px; left:-60px;
+    background:radial-gradient(circle, rgba(255,201,60,0.20), transparent 70%);
+    animation:drift1 16s ease-in-out infinite alternate;
+  }
+  .ambient-blob.b2{
+    width:260px; height:260px;
+    top:120px; right:-100px;
+    background:radial-gradient(circle, rgba(110,231,216,0.16), transparent 70%);
+    animation:drift2 20s ease-in-out infinite alternate;
+  }
+  @keyframes drift1{ from{transform:translate(0,0);} to{transform:translate(20px,30px);} }
+  @keyframes drift2{ from{transform:translate(0,0);} to{transform:translate(-25px,-20px);} }
+  .frame > *{ position:relative; z-index:1; }
+
+  /* ---------- Header ---------- */
+  .topbar{
+    padding:18px 18px 8px;
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+  }
+  .brand-eyebrow{
+    font-family:'JetBrains Mono',monospace;
+    font-size:10px;
+    letter-spacing:0.14em;
+    color:var(--accent);
+    text-transform:uppercase;
+    margin:0 0 2px;
+  }
+  .brand-title{
+    font-family:'Space Grotesk',sans-serif;
+    font-size:20px;
+    font-weight:700;
+    margin:0;
+    letter-spacing:-0.01em;
+    background:linear-gradient(90deg, var(--text) 40%, var(--accent2));
+    -webkit-background-clip:text;
+    background-clip:text;
+    -webkit-text-fill-color:transparent;
+  }
+  .header-right{ display:flex; flex-direction:column; align-items:flex-end; gap:8px; }
+  .avatar-chip{
+    display:flex; align-items:center; gap:6px;
+    background:var(--panel);
+    border:1px solid var(--panel-border);
+    border-radius:999px;
+    padding:4px 10px 4px 4px;
+    cursor:pointer;
+    transition:transform 0.15s ease, border-color 0.15s ease;
+  }
+  .avatar-chip:hover{ transform:translateY(-1px); border-color:var(--accent2-dim); }
+  .avatar-circle{
+    width:24px; height:24px; border-radius:50%;
+    background:linear-gradient(135deg, var(--accent2), var(--accent));
+    color:#0D1319;
+    display:flex; align-items:center; justify-content:center;
+    font-family:'Space Grotesk',sans-serif;
+    font-size:10.5px; font-weight:700;
+    flex-shrink:0;
+  }
+  .avatar-name{ font-size:11px; color:var(--text-dim); max-width:90px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .live-pill{
+    display:flex;
+    align-items:center;
+    gap:6px;
+    background:var(--panel);
+    border:1px solid var(--panel-border);
+    padding:6px 10px;
+    border-radius:999px;
+    font-family:'JetBrains Mono',monospace;
+    font-size:10px;
+    letter-spacing:0.06em;
+    color:var(--text-dim);
+  }
+  .live-dot{
+    width:6px;height:6px;border-radius:50%;
+    background:var(--low);
+    box-shadow:0 0 0 0 rgba(62,207,142,0.6);
+    animation:pulse-dot 2s infinite;
+  }
+  @keyframes pulse-dot{
+    0%{box-shadow:0 0 0 0 rgba(62,207,142,0.5);}
+    70%{box-shadow:0 0 0 6px rgba(62,207,142,0);}
+    100%{box-shadow:0 0 0 0 rgba(62,207,142,0);}
+  }
+
+  /* ---------- Sign-in overlay ---------- */
+  /* ---------- Traffic condition toast ---------- */
+  .traffic-toast{
+    position:absolute;
+    top:14px; left:50%;
+    transform:translate(-50%, -80px);
+    z-index:60;
+    display:flex;
+    align-items:center;
+    gap:8px;
+    background:var(--bg-elevated);
+    border:1px solid var(--panel-border);
+    border-radius:999px;
+    padding:9px 16px;
+    box-shadow:0 8px 24px rgba(0,0,0,0.4);
+    font-size:12.5px;
+    font-weight:600;
+    max-width:88%;
+    opacity:0;
+    transition:transform 0.4s cubic-bezier(0.34,1.56,0.64,1), opacity 0.3s ease;
+    pointer-events:none;
+  }
+  .traffic-toast.show{
+    transform:translate(-50%, 0);
+    opacity:1;
+  }
+  .traffic-toast-icon{ font-size:15px; flex-shrink:0; }
+  .traffic-toast-text{ white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+  .signin-overlay{
+    position:absolute;
+    inset:0;
+    z-index:50;
+    background:
+      radial-gradient(500px 300px at 30% 10%, rgba(255,201,60,0.10), transparent 60%),
+      radial-gradient(500px 300px at 80% 80%, rgba(110,231,216,0.10), transparent 60%),
+      var(--bg);
+    display:flex;
+    flex-direction:column;
+    justify-content:center;
+    padding:32px 26px;
+  }
+  .signin-brand{ text-align:center; margin-bottom:34px; }
+  .signin-logo{
+    width:56px; height:56px; border-radius:16px;
+    background:linear-gradient(135deg, var(--accent2), var(--accent));
+    display:flex; align-items:center; justify-content:center;
+    margin:0 auto 16px;
+    font-family:'Space Grotesk',sans-serif;
+    font-weight:700; font-size:20px; color:#0D1319;
+  }
+  .signin-title{
+    font-family:'Space Grotesk',sans-serif;
+    font-size:22px; font-weight:700; margin:0 0 6px;
+  }
+  .signin-sub{ font-size:12.5px; color:var(--text-dim); margin:0; }
+  .signin-btn{
+    width:100%;
+    display:flex; align-items:center; justify-content:center; gap:10px;
+    padding:13px;
+    border-radius:12px;
+    font-family:'Inter',sans-serif;
+    font-weight:600;
+    font-size:13.5px;
+    cursor:pointer;
+    margin-bottom:12px;
+    transition:transform 0.15s ease, filter 0.15s ease;
+    border:1px solid var(--panel-border);
+  }
+  .signin-btn:active{ transform:scale(0.98); }
+  .signin-btn.google{ background:#fff; color:#1a1a1a; border:none; }
+  .signin-btn.phone{ background:var(--panel); color:var(--text); }
+  .signin-btn svg{ width:18px; height:18px; flex-shrink:0; }
+  .signin-divider{
+    display:flex; align-items:center; gap:10px;
+    color:var(--text-faint); font-size:10.5px; margin:16px 0;
+  }
+  .signin-divider::before, .signin-divider::after{ content:""; flex:1; height:1px; background:var(--panel-border); }
+  .signin-phone-form{ display:none; }
+  .signin-phone-form.active{ display:block; }
+  .signin-phone-form input{
+    width:100%;
+    background:var(--panel);
+    border:1px solid var(--panel-border);
+    color:var(--text);
+    padding:13px;
+    border-radius:12px;
+    font-size:14px;
+    font-family:'JetBrains Mono',monospace;
+    margin-bottom:10px;
+    text-align:center;
+    letter-spacing:0.04em;
+  }
+  .signin-phone-form input:focus{ outline:1px solid var(--accent2); }
+  .signin-status{ text-align:center; font-size:11px; color:var(--text-faint); min-height:16px; margin-top:6px; }
+  .signin-skip{
+    text-align:center; margin-top:18px; font-size:11.5px; color:var(--text-faint);
+    text-decoration:underline; cursor:pointer;
+  }
+
+  /* ---------- Scenario strip (signature: manifest ticker) ---------- */
+  .manifest-ticker{
+    margin:14px 18px 0;
+    border:1px solid var(--panel-border);
+    background:var(--panel);
+    border-radius:14px;
+    padding:10px 14px;
+    position:relative;
+    overflow:hidden;
+  }
+  .manifest-ticker .route-line{
+    position:relative;
+    height:2px;
+    background:repeating-linear-gradient(90deg, var(--line) 0 6px, transparent 6px 12px);
+    margin:10px 0 4px;
+    border-radius:2px;
+  }
+  .bus-marker{
+    position:absolute;
+    top:-7px;
+    width:16px;height:16px;
+    transform:translateX(-50%);
+    animation:travel 6s linear infinite;
+  }
+  @keyframes travel{
+    0%{left:2%;}
+    100%{left:98%;}
+  }
+  .ticker-row{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    font-family:'JetBrains Mono',monospace;
+    font-size:10.5px;
+    color:var(--text-dim);
+  }
+  .ticker-row b{color:var(--text); font-weight:600;}
+
+  /* ---------- Content views ---------- */
+  .content{
+    flex:1;
+    overflow-y:auto;
+    padding:16px 18px 100px;
+  }
+  .view{display:none;}
+  .view.active{display:block; animation:fadein 0.25s ease;}
+  @keyframes fadein{from{opacity:0; transform:translateY(4px);} to{opacity:1; transform:translateY(0);}}
+
+  .section-heading{
+    font-family:'Space Grotesk',sans-serif;
+    font-size:14px;
+    font-weight:600;
+    color:var(--text);
+    margin:18px 0 10px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+  }
+  .section-heading span.sub{
+    font-family:'JetBrains Mono',monospace;
+    font-size:10px;
+    color:var(--text-faint);
+    font-weight:400;
+  }
+
+  /* ---------- Route summary card ---------- */
+  .summary-card{
+    background:var(--panel);
+    border:1px solid var(--panel-border);
+    border-radius:16px;
+    padding:16px;
+  }
+  .summary-grid{
+    display:grid;
+    grid-template-columns:1fr 1fr 1fr;
+    gap:10px;
+    margin-top:12px;
+  }
+  .summary-cell{
+    background:var(--bg-elevated);
+    border-radius:10px;
+    padding:10px;
+  }
+  .summary-cell .label{font-size:9px; text-transform:uppercase; letter-spacing:0.08em; color:var(--text-faint); font-family:'JetBrains Mono',monospace;}
+  .summary-cell .value{font-family:'Space Grotesk',sans-serif; font-size:15px; font-weight:700; margin-top:4px;}
+
+  .recalc-btn{
+    width:100%;
+    margin-top:14px;
+    background:var(--accent);
+    color:#1A1400;
+    border:none;
+    border-radius:12px;
+    padding:12px;
+    font-family:'Space Grotesk',sans-serif;
+    font-weight:700;
+    font-size:13.5px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:8px;
+    cursor:pointer;
+    transition:transform 0.15s ease, filter 0.15s ease;
+  }
+  .recalc-btn:active{transform:scale(0.98); filter:brightness(0.92);}
+
+  /* ---------- Today's overview grid ---------- */
+  .overview-grid{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:10px;
+  }
+  .overview-cell{
+    position:relative;
+    background:var(--panel);
+    border:1px solid var(--panel-border);
+    border-radius:18px;
+    padding:14px 16px;
+    overflow:hidden;
+    transition:transform 0.2s ease, border-color 0.2s ease;
+  }
+  .overview-cell:active{ transform:scale(0.97); }
+  .overview-cell::before{
+    content:"";
+    position:absolute;
+    top:-30px; right:-30px;
+    width:90px; height:90px;
+    border-radius:50%;
+    background:radial-gradient(circle, var(--tint, transparent), transparent 70%);
+    opacity:0.35;
+    pointer-events:none;
+  }
+  .overview-cell.tint-teal{ --tint:#6EE7D8; }
+  .overview-cell.tint-amber{ --tint:#FFC93C; }
+  .overview-cell.tint-blue{ --tint:#5CA9E0; }
+  .overview-cell .icon-label{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    font-size:11px;
+    color:var(--text-dim);
+    position:relative;
+  }
+  .overview-cell .icon-badge{
+    width:26px; height:26px;
+    border-radius:9px;
+    display:flex; align-items:center; justify-content:center;
+    background:color-mix(in srgb, var(--tint, var(--accent2)) 18%, transparent);
+    color:var(--tint, var(--accent2));
+    flex-shrink:0;
+  }
+  .overview-cell .icon-badge svg{width:13px; height:13px;}
+  .overview-cell .value{
+    font-family:'Space Grotesk',sans-serif;
+    font-size:22px;
+    font-weight:700;
+    margin:10px 0 2px;
+    position:relative;
+  }
+  .overview-cell .caption{font-size:10.5px; color:var(--text-faint); position:relative;}
+  .overview-cell .chip{
+    display:inline-block;
+    margin-top:6px;
+    font-size:9.5px;
+    font-weight:700;
+    letter-spacing:0.04em;
+    padding:3px 9px;
+    border-radius:999px;
+    position:relative;
+  }
+
+  /* ---------- Zone congestion bars ---------- */
+  .zone-row{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    padding:10px 0;
+    border-bottom:1px solid var(--panel-border);
+  }
+  .zone-row:last-child{border-bottom:none;}
+  .zone-dot{width:8px; height:8px; border-radius:50%; flex-shrink:0;}
+  .zone-name{flex:1; font-size:12.5px; font-weight:500;}
+  .zone-score{
+    font-family:'JetBrains Mono',monospace;
+    font-size:11.5px;
+    color:var(--text-dim);
+    width:34px;
+    text-align:right;
+  }
+  .zone-bar-track{
+    width:64px;
+    height:5px;
+    background:var(--bg-elevated);
+    border-radius:999px;
+    overflow:hidden;
+  }
+  .zone-bar-fill{height:100%; border-radius:999px;}
+  .recalc-btn svg{width:15px;height:15px;}
+  .recalc-btn.spinning svg{animation:spin 0.9s linear infinite;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+
+  /* ---------- Timeline (stage manifest) ---------- */
+  .timeline{margin-top:18px;}
+  .stage{
+    display:flex;
+    gap:12px;
+    position:relative;
+  }
+  .stage .rail{
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    width:14px;
+  }
+  .stage .dot{
+    width:12px;height:12px;
+    border-radius:50%;
+    flex-shrink:0;
+    margin-top:3px;
+    box-shadow:0 0 0 4px var(--bg);
+    z-index:1;
+  }
+  .stage .thread{
+    width:2px;
+    flex:1;
+    background:var(--line);
+    margin-top:2px;
+  }
+  .stage:last-child .thread{display:none;}
+  .stage-body{
+    padding-bottom:22px;
+    flex:1;
+  }
+  .stage-tag{
+    font-family:'JetBrains Mono',monospace;
+    font-size:9px;
+    letter-spacing:0.1em;
+    color:var(--text-faint);
+    text-transform:uppercase;
+  }
+  .stage-name{
+    font-family:'Space Grotesk',sans-serif;
+    font-size:15px;
+    font-weight:600;
+    margin:2px 0 1px;
+  }
+  .stage-meta{
+    font-size:11.5px;
+    color:var(--text-dim);
+  }
+  .stage-right{
+    text-align:right;
+    min-width:78px;
+  }
+  .stage-eta{
+    font-family:'JetBrains Mono',monospace;
+    font-size:14px;
+    font-weight:700;
+  }
+  .stage-badge{
+    display:inline-block;
+    margin-top:4px;
+    font-size:9.5px;
+    font-weight:700;
+    letter-spacing:0.05em;
+    padding:2px 7px;
+    border-radius:999px;
+  }
+  .row{display:flex; justify-content:space-between; align-items:flex-start;}
+
+  /* ---------- Route (manifest editor) view ---------- */
+  .stop-editor-row{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    background:var(--panel);
+    border:1px solid var(--panel-border);
+    border-radius:12px;
+    padding:10px 12px;
+    margin-bottom:8px;
+  }
+  .stop-editor-row .idx{
+    font-family:'JetBrains Mono',monospace;
+    font-size:11px;
+    color:var(--accent);
+    width:20px;
+  }
+  .stop-editor-row .name{flex:1; font-size:13px; font-weight:500;}
+  .move-btns{display:flex; gap:4px;}
+  .move-btns button{
+    background:var(--bg-elevated);
+    border:1px solid var(--panel-border);
+    color:var(--text-dim);
+    border-radius:6px;
+    width:24px;height:24px;
+    font-size:11px;
+    cursor:pointer;
+  }
+  .remove-btn{
+    background:none;
+    border:none;
+    color:var(--text-faint);
+    font-size:16px;
+    cursor:pointer;
+    padding:0 4px;
+  }
+  .add-stop-row{
+    display:flex;
+    gap:8px;
+    margin-top:12px;
+  }
+  .add-stop-row input{
+    flex:1;
+    background:var(--bg-elevated);
+    border:1px solid var(--panel-border);
+    color:var(--text);
+    padding:10px 12px;
+    border-radius:10px;
+    font-size:13px;
+    font-family:'Inter',sans-serif;
+  }
+  .add-stop-row input:focus{outline:1px solid var(--accent);}
+  .add-stop-row button{
+    background:var(--accent-dim);
+    color:var(--accent);
+    border:1px solid var(--accent-dim);
+    border-radius:10px;
+    padding:0 16px;
+    font-weight:700;
+    cursor:pointer;
+    font-size:13px;
+  }
+
+  /* ---------- Map view ---------- */
+  .map-wrap{
+    background:var(--panel);
+    border:1px solid var(--panel-border);
+    border-radius:16px;
+    overflow:hidden;
+    padding:8px;
+  }
+  .legend{
+    display:flex;
+    gap:14px;
+    flex-wrap:wrap;
+    margin-top:14px;
+    font-size:11px;
+    color:var(--text-dim);
+  }
+  .legend-item{display:flex; align-items:center; gap:6px;}
+  .legend-swatch{width:9px;height:9px;border-radius:50%;}
+
+  /* ---------- Analytics view ---------- */
+  .stat-row{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:10px;
+    margin-bottom:16px;
+  }
+  .stat-card{
+    background:var(--panel);
+    border:1px solid var(--panel-border);
+    border-radius:14px;
+    padding:12px 14px;
+  }
+  .stat-card .label{font-size:9.5px; text-transform:uppercase; letter-spacing:0.07em; color:var(--text-faint); font-family:'JetBrains Mono',monospace;}
+  .stat-card .value{font-family:'Space Grotesk',sans-serif; font-size:19px; font-weight:700; margin-top:5px;}
+  .stat-card .value.small{font-size:14px;}
+  .chart-card{
+    background:var(--panel);
+    border:1px solid var(--panel-border);
+    border-radius:16px;
+    padding:16px;
+    margin-bottom:16px;
+  }
+  .chart-card h4{
+    margin:0 0 12px;
+    font-family:'Space Grotesk',sans-serif;
+    font-size:13px;
+    font-weight:600;
+  }
+
+  /* ---------- Settings view ---------- */
+  .setting-card{
+    background:var(--panel);
+    border:1px solid var(--panel-border);
+    border-radius:14px;
+    padding:14px 16px;
+    margin-bottom:12px;
+  }
+  .setting-card label{
+    display:block;
+    font-size:12px;
+    color:var(--text-dim);
+    margin-bottom:8px;
+    display:flex;
+    justify-content:space-between;
+  }
+  .setting-card label b{color:var(--text); font-family:'JetBrains Mono',monospace; font-weight:600;}
+  .setting-card input[type=range]{
+    width:100%;
+    accent-color:var(--accent);
+  }
+  select{
+    width:100%;
+    background:var(--bg-elevated);
+    color:var(--text);
+    border:1px solid var(--panel-border);
+    padding:10px;
+    border-radius:10px;
+    font-size:13px;
+    font-family:'Inter',sans-serif;
+  }
+  .toggle-row{display:flex; justify-content:space-between; align-items:center;}
+  .switch{
+    position:relative;
+    width:40px;height:22px;
+    background:var(--bg-elevated);
+    border:1px solid var(--panel-border);
+    border-radius:999px;
+    cursor:pointer;
+    transition:background 0.2s;
+  }
+  .switch.on{background:var(--accent-dim); border-color:var(--accent);}
+  .switch .knob{
+    position:absolute;
+    top:2px;left:2px;
+    width:16px;height:16px;
+    border-radius:50%;
+    background:var(--text-faint);
+    transition:transform 0.2s, background 0.2s;
+  }
+  .switch.on .knob{transform:translateX(18px); background:var(--accent);}
+  .caveat{
+    font-size:10.5px;
+    color:var(--text-faint);
+    line-height:1.5;
+    margin-top:6px;
+    padding:10px 12px;
+    background:var(--bg-elevated);
+    border-radius:10px;
+    border:1px dashed var(--panel-border);
+  }
+
+  /* ---------- Bottom nav ---------- */
+  .bottom-nav{
+    position:absolute;
+    bottom:0; left:0; right:0;
+    background:rgba(20,28,36,0.92);
+    backdrop-filter:blur(10px);
+    border-top:1px solid var(--panel-border);
+    display:flex;
+    padding:10px 6px calc(10px + env(safe-area-inset-bottom));
+  }
+  .nav-btn{
+    flex:1;
+    background:none;
+    border:none;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:4px;
+    color:var(--text-faint);
+    cursor:pointer;
+    font-family:'Inter',sans-serif;
+    font-size:9.5px;
+    font-weight:500;
+  }
+  .nav-btn svg{width:19px; height:19px;}
+  .nav-btn.active{color:var(--accent);}
+</style>
+</head>
+<body>
+<div class="frame">
+  <div class="ambient-blob b1"></div>
+  <div class="ambient-blob b2"></div>
+
+  <!-- TRAFFIC CONDITION TOAST -->
+  <div class="traffic-toast" id="trafficToast">
+    <span class="traffic-toast-icon" id="trafficToastIcon">🚦</span>
+    <span class="traffic-toast-text" id="trafficToastText">Checking traffic...</span>
+  </div>
+
+  <!-- SIGN-IN OVERLAY -->
+  <div class="signin-overlay" id="signinOverlay">
+    <div class="signin-brand">
+      <div class="signin-logo">GS</div>
+      <h1 class="signin-title">GoSlow</h1>
+      <p class="signin-sub">Know where the go-slow is before you're stuck in it</p>
+    </div>
+
+    <button class="signin-btn google" id="googleSigninBtn">
+      <svg viewBox="0 0 48 48"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3c-1.6 4.7-6 8-11.3 8-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.1 8 3l6-6C34.5 5.1 29.6 3 24 3 12.4 3 3 12.4 3 24s9.4 21 21 21 21-9.4 21-21c0-1.4-.1-2.7-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.5 15.9 18.9 13 24 13c3.1 0 5.8 1.1 8 3l6-6C34.5 6.1 29.6 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 45c5.5 0 10.4-2.1 14-5.6l-6.5-5.3C29.5 35.9 26.9 37 24 37c-5.3 0-9.7-3.3-11.3-8l-6.6 5.1C9.6 40.6 16.3 45 24 45z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.3-2.2 4.2-4 5.6l6.5 5.3C41.5 35.6 45 30.2 45 24c0-1.4-.1-2.7-.4-3.5z"/></svg>
+      Continue with Google
+    </button>
+    <button class="signin-btn phone" id="showPhoneFormBtn">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/></svg>
+      Continue with phone number
+    </button>
+
+    <div class="signin-phone-form" id="googleForm">
+      <div class="signin-divider">CONFIRM GOOGLE ACCOUNT</div>
+      <input type="text" id="googleNameInput" placeholder="Name">
+      <input type="email" id="googleEmailInput" placeholder="you@gmail.com">
+      <button class="signin-btn google" id="googleContinueBtn">Continue</button>
+      <div class="signin-status" id="googleStatus"></div>
+    </div>
+
+    <div class="signin-phone-form" id="phoneForm">
+      <div class="signin-divider">PHONE SIGN-IN</div>
+      <input type="tel" id="phoneInput" placeholder="+234 8XX XXX XXXX">
+      <button class="signin-btn phone" id="sendCodeBtn" style="margin-bottom:8px;">Send code</button>
+      <div id="otpStep" style="display:none;">
+        <input type="text" id="otpInput" placeholder="6-digit code" maxlength="6">
+        <button class="signin-btn phone" id="verifyCodeBtn">Verify & continue</button>
+      </div>
+      <div class="signin-status" id="signinStatus"></div>
+    </div>
+
+    <div class="signin-skip" id="skipSigninBtn">Skip for now</div>
+  </div>
+
+  <div class="topbar">
+    <div>
+      <p class="brand-eyebrow">Predictive traffic for Lagos</p>
+      <h1 class="brand-title">GoSlow</h1>
+    </div>
+    <div class="header-right">
+      <div class="avatar-chip" id="avatarChip" style="display:none;">
+        <div class="avatar-circle" id="avatarInitials">?</div>
+        <span class="avatar-name" id="avatarName"></span>
+      </div>
+      <div class="live-pill"><span class="live-dot"></span> <span id="liveClock">--:--:--</span></div>
+    </div>
+  </div>
+
+  <div class="manifest-ticker">
+    <div class="ticker-row">
+      <span>SCENARIO</span>
+      <span id="scenarioText"><b>—</b></span>
+    </div>
+    <div class="route-line">
+      <svg class="bus-marker" viewBox="0 0 24 24" fill="none"><rect x="2" y="6" width="20" height="11" rx="2" fill="#FFC93C"/><rect x="4" y="8" width="5" height="4" rx="0.5" fill="#0D1319"/><rect x="11" y="8" width="5" height="4" rx="0.5" fill="#0D1319"/><circle cx="7" cy="18" r="2" fill="#0D1319"/><circle cx="17" cy="18" r="2" fill="#0D1319"/></svg>
+    </div>
+    <div class="ticker-row">
+      <span id="tickerFrom">Warehouse · Ikeja</span>
+      <span id="tickerTo">Balogun Market</span>
+    </div>
+  </div>
+
+  <div class="content">
+
+    <!-- DASHBOARD -->
+    <div class="view active" id="view-dashboard">
+      <div class="summary-card">
+        <div class="row">
+          <div>
+            <p class="stage-tag">TODAY'S DELIVERY RUN</p>
+            <p class="stage-name" id="routeTitle" style="margin-top:2px;">Ikeja → Balogun Market</p>
+          </div>
+        </div>
+        <div class="summary-grid">
+          <div class="summary-cell">
+            <div class="label">Depart</div>
+            <div class="value" id="sumDepart">07:00</div>
+          </div>
+          <div class="summary-cell">
+            <div class="label">Arrive</div>
+            <div class="value" id="sumArrive">—</div>
+          </div>
+          <div class="summary-cell">
+            <div class="label">Worst stage</div>
+            <div class="value small" id="sumWorst">—</div>
+          </div>
+        </div>
+        <button class="recalc-btn" id="recalcBtn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="#1A1400" stroke-width="2.4" stroke-linecap="round"><path d="M4 4v5h5M20 20v-5h-5"/><path d="M20 9a8 8 0 00-14.7-3M4 15a8 8 0 0014.7 3"/></svg>
+          Recalculate route
+        </button>
+      </div>
+
+      <p class="caveat" id="apiWarning" style="display:none; color:var(--medium); border-color:var(--medium);"></p>
+
+      <p class="section-heading">Today's overview</p>
+      <div class="overview-grid">
+        <div class="overview-cell tint-teal">
+          <div class="icon-label">
+            <div class="icon-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21s7-6.5 7-12a7 7 0 10-14 0c0 5.5 7 12 7 12z"/><circle cx="12" cy="9" r="2.5"/></svg></div>
+            Stops
+          </div>
+          <div class="value" id="ovStops">—</div>
+          <div class="caption">before destination</div>
+        </div>
+        <div class="overview-cell tint-amber">
+          <div class="icon-label">
+            <div class="icon-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg></div>
+            Est. time
+          </div>
+          <div class="value" id="ovTime">—</div>
+          <div class="caption">on the road</div>
+        </div>
+        <div class="overview-cell" id="ovWeatherCell">
+          <div class="icon-label">
+            <div class="icon-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 16a4 4 0 010-8 5 5 0 019.6-1.5A4.5 4.5 0 0117.5 16H7z"/><path d="M9 20l1-2M13 20l1-2M17 20l1-2"/></svg></div>
+            Weather
+          </div>
+          <div class="value" id="ovWeather" style="font-size:16px;">—</div>
+          <span class="chip" id="ovWeatherChip"></span>
+        </div>
+        <div class="overview-cell" id="ovAlertCell">
+          <div class="icon-label">
+            <div class="icon-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9L2.5 18a1.5 1.5 0 001.3 2.2h16.4a1.5 1.5 0 001.3-2.2L13.7 3.9a1.5 1.5 0 00-2.6 0z"/></svg></div>
+            Alert
+          </div>
+          <div class="value" id="ovAlert" style="font-size:16px;">—</div>
+          <span class="chip" id="ovAlertChip"></span>
+        </div>
+      </div>
+
+      <p class="section-heading">Zone congestion <span class="sub" id="zoneTime">· 07:00</span></p>
+      <div class="summary-card" id="zoneList"></div>
+
+      <div class="timeline" id="timeline"></div>
+    </div>
+
+    <!-- ROUTE -->
+    <div class="view" id="view-route">
+      <p class="section-heading">Plan a trip</p>
+
+      <div class="setting-card">
+        <label>From</label>
+        <div class="add-stop-row" style="margin-top:0;">
+          <input type="text" id="fromInput" placeholder="Current location">
+          <button id="useCurrentAsFromBtn" title="Use current location">📍</button>
+        </div>
+      </div>
+
+      <div class="setting-card">
+        <label>To</label>
+        <input type="text" id="toInput" placeholder="e.g. Balogun Market, Lagos Island" style="width:100%; background:var(--bg-elevated); border:1px solid var(--panel-border); color:var(--text); padding:10px 12px; border-radius:10px; font-size:13px; font-family:'Inter',sans-serif;">
+      </div>
+
+      <button class="recalc-btn" id="planTripBtn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#1A1400" stroke-width="2.4" stroke-linecap="round"><path d="M12 21s7-6.5 7-12a7 7 0 10-14 0c0 5.5 7 12 7 12z"/><circle cx="12" cy="9" r="2.5"/></svg>
+        Recalculate route
+      </button>
+      <p class="signin-status" id="tripStatus" style="text-align:left; margin-top:8px;"></p>
+
+      <p class="section-heading">Stops on this route</p>
+      <div id="stopEditor"></div>
+      <p class="caveat">You can also set From/To from Settings — both stay in sync with each other.</p>
+    </div>
+
+    <!-- MAP -->
+    <div class="view" id="view-map">
+      <p class="section-heading">Route map <span class="sub" id="mapSub">Lagos</span></p>
+      <div class="map-wrap">
+        <div id="leafletMap" style="width:100%; height:420px; border-radius:10px;"></div>
+      </div>
+      <div class="legend">
+        <div class="legend-item"><span class="legend-swatch" style="background:var(--low)"></span>Low</div>
+        <div class="legend-item"><span class="legend-swatch" style="background:var(--medium)"></span>Medium</div>
+        <div class="legend-item"><span class="legend-swatch" style="background:var(--high)"></span>High</div>
+        <div class="legend-item"><span class="legend-swatch" style="background:var(--severe)"></span>Severe</div>
+      </div>
+      <p class="caveat">Route geometry and drive times come from OpenStreetMap's routing service (OSRM). Congestion per stage still comes from the prediction model — real road routing doesn't know about traffic on its own.</p>
+    </div>
+
+    <!-- ANALYTICS -->
+    <div class="view" id="view-analytics">
+      <p class="section-heading">Analytics <span class="sub">current scenario</span></p>
+      <div class="stat-row">
+        <div class="stat-card">
+          <div class="label">Avg congestion</div>
+          <div class="value" id="statAvg">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Best depart time</div>
+          <div class="value small" id="statBest">—</div>
+        </div>
+      </div>
+      <div class="chart-card">
+        <h4>Congestion by stage</h4>
+        <svg id="barChart" viewBox="0 0 300 150" width="100%" height="150"></svg>
+      </div>
+      <div class="chart-card">
+        <h4 id="lineChartTitle">24-hour trend · Balogun Market</h4>
+        <svg id="lineChart" viewBox="0 0 300 130" width="100%" height="130"></svg>
+      </div>
+    </div>
+
+    <!-- SETTINGS -->
+    <div class="view" id="view-settings">
+      <p class="section-heading">Plan a trip</p>
+
+      <div class="setting-card">
+        <label>From</label>
+        <div class="add-stop-row" style="margin-top:0;">
+          <input type="text" id="fromInputSettings" placeholder="Current location">
+          <button id="useCurrentAsFromBtnSettings" title="Use current location">📍</button>
+        </div>
+      </div>
+
+      <div class="setting-card">
+        <label>To</label>
+        <input type="text" id="toInputSettings" placeholder="e.g. Balogun Market, Lagos Island" style="width:100%; background:var(--bg-elevated); border:1px solid var(--panel-border); color:var(--text); padding:10px 12px; border-radius:10px; font-size:13px; font-family:'Inter',sans-serif;">
+      </div>
+
+      <button class="recalc-btn" id="planTripBtnSettings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#1A1400" stroke-width="2.4" stroke-linecap="round"><path d="M12 21s7-6.5 7-12a7 7 0 10-14 0c0 5.5 7 12 7 12z"/><circle cx="12" cy="9" r="2.5"/></svg>
+        Recalculate route
+      </button>
+      <p class="signin-status" id="tripStatusSettings" style="text-align:left; margin-top:8px;"></p>
+      <p class="caveat">This stays in sync with the Route tab — edit either one and both update together.</p>
+
+      <p class="section-heading">Scenario inputs</p>
+
+      <div class="setting-card toggle-row">
+        <span style="font-size:13px;">Use real current time</span>
+        <div class="switch on" id="liveClockSwitch"><div class="knob"></div></div>
+      </div>
+
+      <div class="setting-card">
+        <label>Time zone</label>
+        <select id="timezoneSelect"></select>
+      </div>
+
+      <div class="setting-card" id="hourCard">
+        <label>Departure time</label>
+        <input type="time" id="timeInput" disabled style="width:100%; background:var(--bg-elevated); border:1px solid var(--panel-border); color:var(--text); padding:10px; border-radius:10px; font-size:14px; font-family:'JetBrains Mono',monospace;">
+      </div>
+
+      <div class="setting-card">
+        <label>Day of week</label>
+        <select id="daySelect">
+          <option value="0">Monday</option>
+          <option value="1">Tuesday</option>
+          <option value="2">Wednesday</option>
+          <option value="3">Thursday</option>
+          <option value="4" selected>Friday</option>
+          <option value="5">Saturday</option>
+          <option value="6">Sunday</option>
+        </select>
+      </div>
+
+      <div class="setting-card toggle-row">
+        <span style="font-size:13px;">Market day</span>
+        <div class="switch on" id="marketSwitch"><div class="knob"></div></div>
+      </div>
+
+      <div class="setting-card">
+        <label>Location</label>
+        <div class="add-stop-row" style="margin-top:0;">
+          <input type="text" id="locationInput" placeholder="e.g. Ikeja, Lagos">
+          <button id="locationSearchBtn">Search</button>
+        </div>
+        <button id="useMyLocationBtn" style="width:100%; margin-top:8px; background:var(--bg-elevated); color:var(--text); border:1px solid var(--panel-border); border-radius:10px; padding:10px; font-size:12.5px; font-weight:600; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
+          Use my current location
+        </button>
+        <p class="caveat" id="weatherStatus">No live weather yet — using the manual sliders below.</p>
+      </div>
+
+      <div class="setting-card">
+        <label>Rainfall <b id="rainVal">4.2 mm</b></label>
+        <input type="range" id="rainSlider" min="0" max="20" step="0.5" value="4.2">
+      </div>
+
+      <div class="setting-card">
+        <label>Temperature <b id="tempVal">28.5°C</b></label>
+        <input type="range" id="tempSlider" min="18" max="38" step="0.5" value="28.5">
+      </div>
+
+      <div class="setting-card toggle-row">
+        <span style="font-size:13px;">Use live model API</span>
+        <div class="switch" id="liveSwitch"><div class="knob"></div></div>
+      </div>
+
+      <div class="setting-card" id="apiUrlCard" style="display:none;">
+        <label>API URL</label>
+        <div class="add-stop-row" style="margin-top:0;">
+          <input type="text" id="apiUrlInput" value="http://localhost:8000">
+          <button id="apiTestBtn">Test</button>
+        </div>
+        <p class="caveat" id="apiStatus">Not checked yet. Start the backend, then tap Test.</p>
+      </div>
+
+      <p class="caveat">With the toggle off, congestion scores come from a client-side approximation of hour/weekday cycles, market-day flags, and weather. Turn it on and tap "Recalculate route" to call your real XGBoost model (model.pkl) via the backend API instead.</p>
+    </div>
+
+  </div>
+
+  <div class="bottom-nav">
+    <button class="nav-btn active" data-view="dashboard">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>
+      Dashboard
+    </button>
+    <button class="nav-btn" data-view="route">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19l5-15 5 10 3-6 3 11"/></svg>
+      Route
+    </button>
+    <button class="nav-btn" data-view="map">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 3L4 5v16l5-2 6 2 5-2V3l-5 2-6-2z"/><path d="M9 3v16M15 5v16"/></svg>
+      Map
+    </button>
+    <button class="nav-btn" data-view="analytics">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20V10M12 20V4M20 20v-7"/></svg>
+      Analytics
+    </button>
+    <button class="nav-btn" data-view="settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.34 1.87l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.7 1.7 0 00-1.87-.34 1.7 1.7 0 00-1 1.55V21a2 2 0 11-4 0v-.09A1.7 1.7 0 009 19.4a1.7 1.7 0 00-1.87.34l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.7 1.7 0 004.6 15a1.7 1.7 0 00-1.55-1H3a2 2 0 110-4h.09A1.7 1.7 0 004.6 9a1.7 1.7 0 00-.34-1.87l-.06-.06a2 2 0 112.83-2.83l.06.06A1.7 1.7 0 009 4.6a1.7 1.7 0 001-1.55V3a2 2 0 114 0v.09a1.7 1.7 0 001 1.55 1.7 1.7 0 001.87-.34l.06-.06a2 2 0 112.83 2.83l-.06.06A1.7 1.7 0 0019.4 9a1.7 1.7 0 001.55 1H21a2 2 0 110 4h-.09a1.7 1.7 0 00-1.51 1z"/></svg>
+      Settings
+    </button>
+  </div>
+
+</div>
+
+<script>
+/* ---------------- State ---------------- */
+const DAY_NAMES = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+
+/* Returns { hour, minute, second, weekday } for "now" in the given IANA
+   timezone, using Intl so it's correct regardless of the device's own
+   system clock/timezone settings. */
+function getNowInZone(tz){
+  try{
+    const fmt = new Intl.DateTimeFormat("en-GB", {
+      timeZone: tz, hour: "2-digit", minute: "2-digit", second: "2-digit",
+      weekday: "short", hour12: false
+    });
+    const parts = {};
+    fmt.formatToParts(new Date()).forEach(p => parts[p.type] = p.value);
+    const hour = parseInt(parts.hour, 10) % 24;
+    const minute = parseInt(parts.minute, 10);
+    const second = parseInt(parts.second, 10);
+    const weekday = DAY_NAMES.indexOf(parts.weekday);
+    return { hour, minute, second, weekday: weekday >= 0 ? weekday : 0 };
+  }catch(err){
+    const now = new Date();
+    return { hour: now.getHours(), minute: now.getMinutes(), second: now.getSeconds(), weekday: (now.getDay()+6)%7 };
+  }
+}
+
+const state = {
+  hour: new Date().getHours(),
+  weekday: (new Date().getDay() + 6) % 7,  // convert JS Sun=0 to Mon=0
+  isMarketDay: true,
+  rain: 4.2,
+  temp: 28.5,
+  weather: null,    // populated once live weather is fetched: {windspeed, cloudcover, humidity, placeName, updatedAt}
+  liveMode: false,
+  apiUrl: "http://localhost:8000",
+  useLiveClock: true,
+  minute: new Date().getMinutes(),
+  timezone: "Africa/Lagos",
+  routeGeometry: null, // set once a real OSRM road route has been planned
+  hasPlannedTrip: false, // stays false until the user actually plans a From/To route
+  user: null,       // { name, initials, source }
+  stops: [
+    { name: "Warehouse · Ikeja", isStart: true, base: 0.0,  lat: 6.6018, lng: 3.3515, zone: 0 },
+    { name: "Yaba Tech Market",  isStart: false, base: 0.08, lat: 6.5158, lng: 3.3707, zone: 1 },
+    { name: "Oshodi Market",     isStart: false, base: 0.26, lat: 6.5544, lng: 3.3488, zone: 2 },
+    { name: "Mushin Motor Park", isStart: false, base: 0.25, lat: 6.5295, lng: 3.3538, zone: 3 },
+    { name: "Ojuelegba",         isStart: false, base: 0.11, lat: 6.5086, lng: 3.3653, zone: 4 },
+    { name: "Balogun Market",    isStart: false, base: 0.51, lat: 6.4531, lng: 3.3958, zone: 5 }
+  ]
+};
+
+/* ---------------- Model approximation ---------------- */
+function computeScore(base, s){
+  const rush = (s.hour>=7&&s.hour<=9)||(s.hour>=16&&s.hour<=19);
+  const timeBoost = rush ? 0.15 : (s.hour>=11&&s.hour<=15 ? 0.05 : -0.05);
+  const weekdayBoost = s.weekday<=4 ? 0.05 : -0.10;
+  const marketBoost = s.isMarketDay ? 0.08 : 0;
+  const rainBoost = (s.rain/10)*0.15;
+  let score = base + timeBoost + weekdayBoost + marketBoost + rainBoost;
+  return Math.max(0.03, Math.min(0.97, score));
+}
+function band(score){
+  if(score<0.35) return {label:"LOW", color:"var(--low)", key:"low"};
+  if(score<0.55) return {label:"MEDIUM", color:"var(--medium)", key:"medium"};
+  if(score<0.75) return {label:"HIGH", color:"var(--high)", key:"high"};
+  return {label:"SEVERE", color:"var(--severe)", key:"severe"};
+}
+function rainBand(rainMm){
+  if(rainMm <= 0) return {label:"NO RAIN", color:"var(--low)"};
+  if(rainMm < 2.5) return {label:"LIGHT RAIN", color:"var(--medium)"};
+  if(rainMm < 10) return {label:"HIGH RAIN", color:"var(--high)"};
+  return {label:"SEVERE RAIN", color:"var(--severe)"};
+}
+function legMinutes(score){ return Math.round(18 + score*18); }
+
+let trafficToastTimer = null;
+function showTrafficToast(rows){
+  const scored = rows.filter(r=>!r.isStart);
+  if(!scored.length) return;
+
+  const avgScore = scored.reduce((a,r)=>a+r.score,0) / scored.length;
+  const maxScore = scored.reduce((a,r)=>Math.max(a,r.score), 0);
+
+  let icon, text, tint;
+  if(maxScore >= 0.75){
+    icon = "🔴"; tint = "var(--severe)";
+    text = "Heavy traffic ahead on this route — expect significant delays.";
+  } else if(avgScore >= 0.55){
+    icon = "🟠"; tint = "var(--high)";
+    text = "Busy roads on this route — some delay likely.";
+  } else if(avgScore >= 0.35){
+    icon = "🟡"; tint = "var(--medium)";
+    text = "Moderate traffic on this route — nothing too bad.";
+  } else {
+    icon = "🟢"; tint = "var(--low)";
+    text = "Roads look clear — little to no traffic expected.";
+  }
+
+  const toast = document.getElementById("trafficToast");
+  document.getElementById("trafficToastIcon").textContent = icon;
+  document.getElementById("trafficToastText").textContent = text;
+  toast.style.borderColor = tint;
+
+  toast.classList.add("show");
+  if(trafficToastTimer) clearTimeout(trafficToastTimer);
+  trafficToastTimer = setTimeout(()=>{ toast.classList.remove("show"); }, 4500);
+}
+
+function fmtTime(mins){
+  const h = Math.floor(mins/60)%24;
+  const m = mins%60;
+  return String(h).padStart(2,"0")+":"+String(m).padStart(2,"0");
+}
+
+function legTimeFor(stop, score){
+  if(stop.osrmMinutes){
+    // Real free-flow drive time from OSRM, inflated by how congested the model predicts this stage to be.
+    return Math.round(stop.osrmMinutes * (1 + score));
+  }
+  return legMinutes(score);
+}
+
+function computeRoute(){
+  let clock = state.hour*60 + (state.minute||0);
+  const rows = [];
+  state.stops.forEach((stop, i)=>{
+    if(stop.isStart){
+      rows.push({...stop, score:0, eta:clock, isStart:true});
+      return;
+    }
+    const score = computeScore(stop.base, state);
+    const leg = legTimeFor(stop, score);
+    clock += leg;
+    rows.push({...stop, score, eta:clock, leg});
+  });
+  return rows;
+}
+
+function buildFeatures(stop, s, lags){
+  const hourAngle = 2*Math.PI*s.hour/24;
+  const dayAngle = 2*Math.PI*s.weekday/7;
+  const isRaining = s.rain > 0 ? 1 : 0;
+  const w = s.weather; // live weather snapshot, if fetched
+  return {
+    hour: s.hour,
+    weekday: s.weekday,
+    is_weekend: s.weekday >= 5 ? 1 : 0,
+    is_holiday: 0,
+    is_market_day: s.isMarketDay ? 1 : 0,
+    hour_sin: Math.sin(hourAngle),
+    hour_cos: Math.cos(hourAngle),
+    day_sin: Math.sin(dayAngle),
+    day_cos: Math.cos(dayAngle),
+    zone_code: stop.zone,
+    temperature_2m: s.temp,
+    rain: s.rain,
+    precipitation: s.rain,
+    windspeed_10m: w ? w.windspeed : 12.0,
+    cloudcover: w ? w.cloudcover : (isRaining ? 85.0 : 40.0),
+    relativehumidity_2m: w ? w.humidity : (isRaining ? 90.0 : 65.0),
+    is_raining: isRaining,
+    heavy_rain: s.rain > 10 ? 1 : 0,
+    congestion_lag1: lags.lag1,
+    congestion_lag3: lags.lag3,
+    congestion_lag24: lags.lag24,
+    congestion_rolling3: lags.rolling3
+  };
+}
+
+async function fetchLiveScore(stop, s, lags){
+  const res = await fetch(s.apiUrl.replace(/\/$/,"") + "/predict", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(buildFeatures(stop, s, lags))
+  });
+  if(!res.ok) throw new Error("API responded " + res.status);
+  const data = await res.json();
+  return Math.max(0.03, Math.min(0.97, data.congestion_score));
+}
+
+async function computeRouteLive(){
+  let clock = state.hour*60 + (state.minute||0);
+  const rows = [];
+  const history = []; // recent predicted scores, most recent last
+  for(const stop of state.stops){
+    if(stop.isStart){
+      rows.push({...stop, score:0, eta:clock, isStart:true});
+      continue;
+    }
+    const lag1 = history.length ? history[history.length-1] : 0.5;
+    const lag3 = history.length>=3 ? history[history.length-3] : lag1;
+    const rollWindow = history.slice(-3);
+    const rolling3 = rollWindow.length ? rollWindow.reduce((a,b)=>a+b,0)/rollWindow.length : lag1;
+    const score = await fetchLiveScore(stop, state, {lag1, lag3, lag24: lag1, rolling3});
+    history.push(score);
+    const leg = legTimeFor(stop, score);
+    clock += leg;
+    rows.push({...stop, score, eta:clock, leg});
+  }
+  return rows;
+}
+
+/* ---------------- Rendering ---------------- */
+function renderScenarioTicker(){
+  document.getElementById("scenarioText").innerHTML =
+    `<b>${fmtTime(state.hour*60 + (state.minute||0))} · ${DAY_NAMES[state.weekday]} · Rain ${state.rain}mm${state.isMarketDay?" · Market day":""}</b>`;
+  document.getElementById("tickerFrom").textContent = state.stops[0].name;
+  document.getElementById("tickerTo").textContent = state.stops[state.stops.length-1].name;
+}
+
+function renderDashboard(rows){
+  const timeline = document.getElementById("timeline");
+  timeline.innerHTML = "";
+  rows.forEach((r, i)=>{
+    const b = r.isStart ? rainBand(state.rain) : band(r.score);
+    const el = document.createElement("div");
+    el.className = "stage";
+    el.innerHTML = `
+      <div class="rail">
+        <div class="dot" style="background:${b.color}"></div>
+        <div class="thread"></div>
+      </div>
+      <div class="stage-body">
+        <div class="row">
+          <div>
+            <p class="stage-tag">${r.isStart? "DEPART · " + fmtTime(r.eta) : "STAGE " + String(i).padStart(2,"0")}</p>
+            <p class="stage-name">${r.name}</p>
+            <p class="stage-meta">${r.isStart? (state.rain>0 ? state.rain.toFixed(1)+"mm rain at departure" : "Clear at departure") : "ETA " + fmtTime(r.eta)}</p>
+          </div>
+          <div class="stage-right">
+            ${r.isStart ? "" : `<div class="stage-eta">${r.leg} min</div>`}
+            <span class="stage-badge" style="background:${b.color}22; color:${b.color};">${b.label}</span>
+          </div>
+        </div>
+      </div>`;
+    timeline.appendChild(el);
+  });
+
+  document.getElementById("routeTitle").textContent =
+    rows[0].name.split(",")[0] + " → " + rows[rows.length-1].name.split(",")[0];
+  document.getElementById("sumDepart").textContent = fmtTime(rows[0].eta);
+  document.getElementById("sumArrive").textContent = fmtTime(rows[rows.length-1].eta);
+  const worst = rows.slice(1).reduce((a,b)=> b.score>a.score? b:a, rows[1]);
+  document.getElementById("sumWorst").textContent = worst.name.split(" · ")[0].split(" ")[0]+" "+ (worst.name.split(" ")[1]||"");
+  document.getElementById("sumWorst").textContent = worst.name;
+}
+
+function renderRouteEditor(){
+  const el = document.getElementById("stopEditor");
+  el.innerHTML = "";
+  state.stops.forEach((s,i)=>{
+    const row = document.createElement("div");
+    row.className = "stop-editor-row";
+    row.innerHTML = `
+      <span class="idx">${String(i).padStart(2,"0")}</span>
+      <span class="name">${s.name}${s.isStart? " (from)": (i===state.stops.length-1? " (to)":"")}</span>
+    `;
+    el.appendChild(row);
+  });
+}
+
+let leafletMap = null;
+let leafletLayer = null;
+
+function ensureLeafletMap(){
+  if(leafletMap) return leafletMap;
+  const LAGOS_BOUNDS = L.latLngBounds([6.30, 2.70], [6.75, 4.10]); // covers Lagos State's full extent, edge-to-edge
+  leafletMap = L.map("leafletMap", {
+    zoomControl: true,
+    attributionControl: true,
+    maxBounds: LAGOS_BOUNDS,
+    maxBoundsViscosity: 1.0, // hard stop at the state boundary — no rubber-band scrolling past it
+    minZoom: 10               // can't zoom out far enough to see the rest of Nigeria
+  }).setView([6.5244, 3.3792], 11); // Lagos-wide default view
+  L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+    attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+    maxZoom: 19
+  }).addTo(leafletMap);
+  leafletLayer = L.layerGroup().addTo(leafletMap);
+  return leafletMap;
+}
+
+function renderMap(rows){
+  if(typeof L === "undefined") return; // Leaflet failed to load (e.g. offline)
+  const map = ensureLeafletMap();
+  leafletLayer.clearLayers();
+
+  const subEl = document.getElementById("mapSub");
+  if(subEl) subEl.textContent = rows[0].name.split(",")[0] + " → " + rows[rows.length-1].name.split(",")[0];
+
+  const latlngs = state.routeGeometry && state.routeGeometry.length
+    ? state.routeGeometry
+    : rows.map(r=>[r.lat, r.lng]);
+  const lineStyle = state.routeGeometry && state.routeGeometry.length
+    ? { color:"#6EE7D8", weight:4, opacity:0.85, lineCap:"round" }       // real road path, solid
+    : { color:"#3A4A58", weight:3, dashArray:"1 10", lineCap:"round" }; // placeholder straight line
+  L.polyline(latlngs, lineStyle).addTo(leafletLayer);
+
+  rows.forEach((r,i)=>{
+    const b = r.isStart ? rainBand(state.rain) : band(r.score);
+    const marker = L.circleMarker([r.lat, r.lng], {
+      radius: r.isStart ? 8 : 7,
+      color: b.color,
+      weight: 2.5,
+      fillColor: b.color,
+      fillOpacity: 0.85
+    }).addTo(leafletLayer);
+    const label = r.isStart
+      ? `<b>${r.name}</b><br>Departs ${fmtTime(r.eta)} · ${b.label}`
+      : `<b>${r.name}</b><br>ETA ${fmtTime(r.eta)} · ${b.label} (${r.score.toFixed(2)})`;
+    marker.bindPopup(label);
+    if(i===0) marker.openPopup();
+  });
+
+  if(state.hasPlannedTrip){
+    const bounds = L.latLngBounds(latlngs);
+    map.fitBounds(bounds, { padding: [30,30] });
+  }
+}
+
+function renderAnalytics(rows){
+  const scored = rows.filter(r=>!r.isStart);
+  const avg = scored.reduce((a,r)=>a+r.score,0)/scored.length;
+  document.getElementById("statAvg").textContent = Math.round(avg*100)+"%";
+
+  // best depart hour: scan 0-23 for lowest avg score across route
+  let best = {hour:0, score:9};
+  for(let h=0; h<24; h++){
+    const test = {...state, hour:h};
+    const s = scored.reduce((a,r)=>a+computeScore(r.base,test),0)/scored.length;
+    if(s<best.score) best = {hour:h, score:s};
+  }
+  document.getElementById("statBest").textContent = fmtTime(best.hour*60);
+
+  // bar chart
+  const barSvg = document.getElementById("barChart");
+  const bw = 300/scored.length;
+  let barHtml = "";
+  scored.forEach((r,i)=>{
+    const h = r.score*110;
+    const b = band(r.score);
+    const x = i*bw + bw*0.2;
+    barHtml += `<rect x="${x}" y="${130-h}" width="${bw*0.6}" height="${h}" rx="4" fill="${b.color}"/>
+      <text x="${x+bw*0.3}" y="145" fill="#8A93A3" font-size="7" font-family="Inter" text-anchor="middle">${r.name.split(" ")[0]}</text>`;
+  });
+  barSvg.innerHTML = barHtml;
+
+  // line chart for last stop across 24h
+  const target = rows[rows.length-1];
+  const lineSvg = document.getElementById("lineChart");
+  document.getElementById("lineChartTitle").textContent = "24-hour trend · " + target.name;
+  let pts = [];
+  for(let h=0; h<24; h++){
+    const test = {...state, hour:h};
+    const s = computeScore(target.base, test);
+    pts.push([ (h/23)*290+5, 110 - s*95 ]);
+  }
+  const linePath = "M " + pts.map(p=>p.join(" ")).join(" L ");
+  const areaPath = linePath + ` L 295 110 L 5 110 Z`;
+  lineSvg.innerHTML = `
+    <path d="${areaPath}" fill="#FFC93C" opacity="0.08"/>
+    <path d="${linePath}" stroke="#FFC93C" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="${(state.hour/23)*290+5}" y1="5" x2="${(state.hour/23)*290+5}" y2="110" stroke="#5B6572" stroke-dasharray="2 3"/>
+  `;
+}
+
+function renderOverview(rows){
+  const scored = rows.filter(r=>!r.isStart);
+  const beforeDest = scored.slice(0, -1); // every stage except the final destination itself
+
+  document.getElementById("ovStops").textContent = beforeDest.length;
+
+  const totalMin = rows[rows.length-1].eta - rows[0].eta;
+  const h = Math.floor(totalMin/60), m = totalMin%60;
+  document.getElementById("ovTime").textContent = (h>0? h+"h ":"") + m + "m";
+
+  const isRaining = state.rain > 0;
+  document.getElementById("ovWeather").textContent = isRaining ? state.rain.toFixed(1)+"mm rain" : "No rain";
+  const weatherChip = document.getElementById("ovWeatherChip");
+  let weatherTint;
+  if(isRaining){
+    weatherChip.textContent = state.rain > 10 ? "High impact" : "Some impact";
+    weatherTint = state.rain > 10 ? "var(--severe)" : "var(--medium)";
+  } else {
+    weatherChip.textContent = "Low impact";
+    weatherTint = "var(--low)";
+  }
+  weatherChip.style.background = weatherTint + "22";
+  weatherChip.style.color = weatherTint;
+  document.getElementById("ovWeatherCell").style.setProperty("--tint", weatherTint);
+  const weatherEl = document.getElementById("ovWeather").parentElement;
+  let liveTag = weatherEl.querySelector(".live-weather-tag");
+  if(state.weather){
+    if(!liveTag){
+      liveTag = document.createElement("div");
+      liveTag.className = "caption live-weather-tag";
+      weatherEl.appendChild(liveTag);
+    }
+    liveTag.textContent = "Live · " + state.weather.placeName;
+  } else if(liveTag){
+    liveTag.remove();
+  }
+
+  // Alert reflects the worst road *leading into* the destination — like checking
+  // traffic before you arrive — not the destination's own congestion score.
+  const alertChip = document.getElementById("ovAlertChip");
+  if(beforeDest.length === 0){
+    document.getElementById("ovAlert").textContent = "Direct route";
+    alertChip.textContent = "No waypoints";
+    alertChip.style.background = "var(--low)22";
+    alertChip.style.color = "var(--low)";
+    document.getElementById("ovAlertCell").style.setProperty("--tint", "var(--low)");
+  } else {
+    const worst = beforeDest.reduce((a,r)=> r.score>a.score? r:a, beforeDest[0]);
+    const worstBand = band(worst.score);
+    document.getElementById("ovAlert").textContent = worst.name.split(" · ")[0];
+    alertChip.textContent = worstBand.label.charAt(0) + worstBand.label.slice(1).toLowerCase();
+    alertChip.style.background = worstBand.color + "22";
+    alertChip.style.color = worstBand.color;
+    document.getElementById("ovAlertCell").style.setProperty("--tint", worstBand.color);
+  }
+
+  document.getElementById("zoneTime").textContent = "· " + fmtTime(rows[0].eta);
+  const zoneList = document.getElementById("zoneList");
+  zoneList.innerHTML = scored.map(r=>{
+    const b = band(r.score);
+    return `
+      <div class="zone-row">
+        <span class="zone-dot" style="background:${b.color}"></span>
+        <span class="zone-name">${r.name}</span>
+        <span class="zone-score">${r.score.toFixed(2)}</span>
+        <div class="zone-bar-track"><div class="zone-bar-fill" style="width:${r.score*100}%; background:${b.color}"></div></div>
+      </div>`;
+  }).join("");
+}
+
+function renderAll(rows){
+  rows = rows || computeRoute();
+  renderScenarioTicker();
+  renderDashboard(rows);
+  renderOverview(rows);
+  renderRouteEditor();
+  renderMap(rows);
+  renderAnalytics(rows);
+}
+
+function showApiWarning(msg){
+  const el = document.getElementById("apiWarning");
+  if(!msg){ el.style.display = "none"; return; }
+  el.textContent = msg;
+  el.style.display = "block";
+}
+
+/* ---------------- Controls ---------------- */
+document.querySelectorAll(".nav-btn").forEach(btn=>{
+  btn.addEventListener("click", ()=>{
+    document.querySelectorAll(".nav-btn").forEach(b=>b.classList.remove("active"));
+    document.querySelectorAll(".view").forEach(v=>v.classList.remove("active"));
+    btn.classList.add("active");
+    document.getElementById("view-"+btn.dataset.view).classList.add("active");
+    if(btn.dataset.view === "map" && leafletMap){
+      setTimeout(()=>leafletMap.invalidateSize(), 50);
+    }
+  });
+});
+
+document.getElementById("recalcBtn").addEventListener("click", async (e)=>{
+  const btn = e.currentTarget;
+  btn.classList.add("spinning");
+  showApiWarning(null);
+
+  try{
+    await getMyLocationWeather();
+  }catch(err){
+    setWeatherStatus(err.message + " — using the current weather settings instead.", "error");
+  }
+
+  let finalRows;
+  if(state.liveMode){
+    try{
+      finalRows = await computeRouteLive();
+      renderAll(finalRows);
+    }catch(err){
+      showApiWarning("Couldn't reach the model API (" + err.message + ") — showing the simulated estimate instead.");
+      finalRows = computeRoute();
+      renderAll(finalRows);
+    }
+  } else {
+    finalRows = computeRoute();
+    renderAll(finalRows);
+  }
+  showTrafficToast(finalRows);
+  btn.classList.remove("spinning");
+});
+
+document.getElementById("daySelect").addEventListener("change", (e)=>{
+  state.weekday = parseInt(e.target.value);
+  renderAll();
+});
+document.getElementById("marketSwitch").addEventListener("click", (e)=>{
+  state.isMarketDay = !state.isMarketDay;
+  e.currentTarget.classList.toggle("on", state.isMarketDay);
+  renderAll();
+});
+document.getElementById("rainSlider").addEventListener("input", (e)=>{
+  state.rain = parseFloat(e.target.value);
+  document.getElementById("rainVal").textContent = state.rain.toFixed(1)+" mm";
+  if(state.weather) setWeatherStatus("Manually overridden since the last live fetch.");
+  renderAll();
+});
+document.getElementById("tempSlider").addEventListener("input", (e)=>{
+  state.temp = parseFloat(e.target.value);
+  document.getElementById("tempVal").textContent = state.temp.toFixed(1)+"°C";
+  if(state.weather) setWeatherStatus("Manually overridden since the last live fetch.");
+  renderAll();
+});
+/* ---------------- Live weather + departure location ---------------- */
+/* Weather: Open-Meteo (free, no key). Geocoding: OSM Nominatim (free, no key,
+   street-level search + reverse geocoding). Both are called client-side. */
+function setWeatherStatus(text, tone){
+  const el = document.getElementById("weatherStatus");
+  el.textContent = text;
+  el.style.color = tone === "error" ? "var(--severe)" : tone === "ok" ? "var(--low)" : "var(--text-faint)";
+}
+
+async function reverseGeocode(lat, lon){
+  const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&zoom=17&addressdetails=1`;
+  const res = await fetch(url, { headers: { "Accept-Language": "en" } });
+  if(!res.ok) throw new Error("Reverse geocoding failed (" + res.status + ")");
+  const data = await res.json();
+  const a = data.address || {};
+  const street = a.road || a.pedestrian || a.footway || a.neighbourhood || a.suburb;
+  const area = a.suburb || a.city_district || a.city || a.town;
+  const label = [street, area].filter(Boolean).join(", ") || data.display_name || "your location";
+  return label;
+}
+
+async function forwardGeocode(query){
+  const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(query)}&limit=1&addressdetails=1`;
+  const res = await fetch(url, { headers: { "Accept-Language": "en" } });
+  if(!res.ok) throw new Error("Search failed (" + res.status + ")");
+  const results = await res.json();
+  if(!results.length) return null;
+  const r = results[0];
+  const a = r.address || {};
+  const street = a.road || a.pedestrian;
+  const area = a.suburb || a.city_district || a.city || a.town || a.state;
+  const label = [street, area].filter(Boolean).join(", ") || r.display_name.split(",").slice(0,2).join(",");
+  return { lat: parseFloat(r.lat), lon: parseFloat(r.lon), label };
+}
+
+async function fetchWeatherAt(lat, lon){
+  const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
+    `&current=temperature_2m,precipitation,rain,relative_humidity_2m,wind_speed_10m,cloud_cover&timezone=auto`;
+  const res = await fetch(url);
+  if(!res.ok) throw new Error("Weather service responded " + res.status);
+  const data = await res.json();
+  if(!data.current) throw new Error("No current weather in response");
+  return data.current;
+}
+
+async function setDepartureLocation(lat, lon, label){
+  const c = await fetchWeatherAt(lat, lon);
+
+  state.rain = c.rain ?? c.precipitation ?? 0;
+  state.temp = c.temperature_2m ?? state.temp;
+  state.weather = {
+    windspeed: c.wind_speed_10m ?? 12,
+    cloudcover: c.cloud_cover ?? 50,
+    humidity: c.relative_humidity_2m ?? 70,
+    placeName: label,
+    updatedAt: c.time
+  };
+  state.stops[0] = { ...state.stops[0], name: label, lat, lng: lon };
+
+  document.getElementById("rainSlider").value = state.rain;
+  document.getElementById("rainVal").textContent = state.rain.toFixed(1) + " mm";
+  document.getElementById("tempSlider").value = state.temp;
+  document.getElementById("tempVal").textContent = state.temp.toFixed(1) + "°C";
+
+  const time = c.time ? c.time.split("T")[1] : "";
+  setWeatherStatus(`Departing from ${label} · ${time} · ${state.rain.toFixed(1)}mm rain, ${state.temp.toFixed(1)}°C.`, "ok");
+  renderAll();
+}
+
+async function searchLocation(){
+  const query = document.getElementById("locationInput").value.trim();
+  if(!query) return;
+  setWeatherStatus("Looking up " + query + "...");
+  try{
+    const place = await forwardGeocode(query);
+    if(!place){
+      setWeatherStatus(`Couldn't find "${query}" — try adding the city name.`, "error");
+      return;
+    }
+    await setDepartureLocation(place.lat, place.lon, place.label);
+  }catch(err){
+    setWeatherStatus("Couldn't fetch that location: " + err.message, "error");
+  }
+}
+
+function getMyLocationWeather(){
+  return new Promise((resolve, reject)=>{
+    if(!navigator.geolocation){
+      reject(new Error("Geolocation isn't supported in this browser"));
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      async (pos)=>{
+        const { latitude, longitude } = pos.coords;
+        try{
+          let label = "your location";
+          try{ label = await reverseGeocode(latitude, longitude); }catch(_e){ /* fall back to generic label */ }
+          await setDepartureLocation(latitude, longitude, label);
+          resolve();
+        }catch(err){ reject(err); }
+      },
+      (err)=>{ reject(new Error("Location access denied or unavailable")); },
+      { timeout: 10000, enableHighAccuracy: true }
+    );
+  });
+}
+
+function useMyLocation(){
+  setWeatherStatus("Requesting your location...");
+  getMyLocationWeather().catch(err=>{
+    setWeatherStatus(err.message + " — search a place name instead.", "error");
+  });
+}
+
+document.getElementById("locationSearchBtn").addEventListener("click", searchLocation);
+document.getElementById("locationInput").addEventListener("keydown", (e)=>{
+  if(e.key === "Enter") searchLocation();
+});
+document.getElementById("useMyLocationBtn").addEventListener("click", useMyLocation);
+
+
+document.getElementById("liveSwitch").addEventListener("click", (e)=>{
+  state.liveMode = !state.liveMode;
+  e.currentTarget.classList.toggle("on", state.liveMode);
+  document.getElementById("apiUrlCard").style.display = state.liveMode ? "block" : "none";
+  showApiWarning(null);
+});
+document.getElementById("apiUrlInput").addEventListener("input", (e)=>{
+  state.apiUrl = e.target.value.trim();
+});
+document.getElementById("apiTestBtn").addEventListener("click", async ()=>{
+  const statusEl = document.getElementById("apiStatus");
+  statusEl.textContent = "Checking...";
+  try{
+    const res = await fetch(state.apiUrl.replace(/\/$/,"") + "/health");
+    const data = await res.json();
+    if(data.model_loaded){
+      statusEl.textContent = `Connected — model expects ${data.num_features_expected} features. Ready to recalculate live.`;
+      statusEl.style.color = "var(--low)";
+    } else {
+      statusEl.textContent = `Server reachable but model not loaded: ${data.error || "check MODEL_PATH"}.`;
+      statusEl.style.color = "var(--medium)";
+    }
+  }catch(err){
+    statusEl.textContent = "Couldn't reach the API. Is the backend running (uvicorn app:app --port 8000)?";
+    statusEl.style.color = "var(--severe)";
+  }
+});
+/* ---------------- Trip planning: From/To + real road routing (OSRM) ---------------- */
+function setTripStatus(text, tone){
+  const color = tone === "error" ? "var(--severe)" : tone === "ok" ? "var(--low)" : "var(--text-faint)";
+  ["tripStatus","tripStatusSettings"].forEach(id=>{
+    const el = document.getElementById(id);
+    if(el){ el.textContent = text; el.style.color = color; }
+  });
+}
+
+async function fetchOsrmRoute(origin, dest){
+  const url = `https://router.project-osrm.org/route/v1/driving/${origin.lon},${origin.lat};${dest.lon},${dest.lat}?overview=full&geometries=geojson`;
+  const res = await fetch(url);
+  if(!res.ok) throw new Error("Routing service responded " + res.status);
+  const data = await res.json();
+  if(data.code !== "Ok" || !data.routes || !data.routes.length) throw new Error("No drivable route found between those points");
+  return data.routes[0]; // { distance (m), duration (s), geometry: {coordinates:[[lon,lat],...]} }
+}
+
+async function planTrip(){
+  const fromQuery = document.getElementById("fromInput").value.trim();
+  const toQuery = document.getElementById("toInput").value.trim();
+  if(!toQuery){
+    setTripStatus("Enter a destination first.", "error");
+    return;
+  }
+
+  const btn = document.getElementById("planTripBtn");
+  btn.classList.add("spinning");
+  setTripStatus("Locating your route...");
+
+  try{
+    // Resolve origin: typed "From", or current GPS location if left blank.
+    let origin, originLabel;
+    if(fromQuery){
+      const place = await forwardGeocode(fromQuery);
+      if(!place) throw new Error(`Couldn't find "${fromQuery}"`);
+      origin = { lat: place.lat, lon: place.lon };
+      originLabel = place.label;
+    } else {
+      const pos = await new Promise((resolve, reject)=>{
+        if(!navigator.geolocation){ reject(new Error("Geolocation isn't supported — type a From location instead")); return; }
+        navigator.geolocation.getCurrentPosition(resolve, ()=>reject(new Error("Location access denied — type a From location instead")), { timeout: 10000, enableHighAccuracy: true });
+      });
+      origin = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+      try{ originLabel = await reverseGeocode(origin.lat, origin.lon); }catch(_e){ originLabel = "Your location"; }
+    }
+
+    // Resolve destination.
+    const destPlace = await forwardGeocode(toQuery);
+    if(!destPlace) throw new Error(`Couldn't find "${toQuery}"`);
+    const dest = { lat: destPlace.lat, lon: destPlace.lon };
+
+    setTripStatus("Fetching road route...");
+    const route = await fetchOsrmRoute(origin, dest);
+    const coords = route.geometry.coordinates; // [lon, lat] pairs along the real road path
+
+    // Cut the route into a handful of stages for congestion prediction.
+    const STAGE_COUNT = Math.min(4, Math.max(2, Math.round(route.distance / 4000))); // ~1 stage per 4km, 2-4 stages
+    const cutIdxs = [];
+    for(let s=1; s<=STAGE_COUNT; s++){
+      cutIdxs.push(Math.round((coords.length - 1) * (s / STAGE_COUNT)));
+    }
+
+    setTripStatus("Naming stages along the route...");
+    const newStops = [{
+      name: originLabel, isStart: true, base: 0.0,
+      lat: origin.lat, lng: origin.lon, zone: 0
+    }];
+    for(let i=0; i<cutIdxs.length; i++){
+      const [lon, lat] = coords[cutIdxs[i]];
+      let label;
+      if(i === cutIdxs.length - 1){
+        label = destPlace.label; // final stage is the actual destination
+      } else {
+        try{ label = await reverseGeocode(lat, lon); }
+        catch(_e){ label = `Along route ${i+1}`; }
+        await new Promise(r=>setTimeout(r, 350)); // be polite to Nominatim's rate limit
+      }
+      newStops.push({
+        name: label, isStart: false,
+        base: 0.15 + (i / cutIdxs.length) * 0.2, // mild default variation, no per-stage history yet
+        lat, lng: lon, zone: i+1,
+        osrmMinutes: Math.round((route.duration / cutIdxs.length) / 60)
+      });
+    }
+
+    state.stops = newStops;
+    state.routeGeometry = coords.map(([lon, lat]) => [lat, lon]); // for drawing the real road path on the map
+    state.hasPlannedTrip = true;
+
+    setTripStatus(`Route found · ${(route.distance/1000).toFixed(1)}km · ~${Math.round(route.duration/60)} min free-flow`, "ok");
+    const plannedRows = computeRoute();
+    renderAll(plannedRows);
+    showTrafficToast(plannedRows);
+  }catch(err){
+    setTripStatus(err.message, "error");
+  }
+  btn.classList.remove("spinning");
+}
+
+document.getElementById("planTripBtn").addEventListener("click", planTrip);
+document.getElementById("useCurrentAsFromBtn").addEventListener("click", async ()=>{
+  document.getElementById("fromInput").value = "";
+  document.getElementById("fromInputSettings").value = "";
+  setTripStatus("From set to your current location — tap Recalculate route.");
+});
+
+// Keep the Route tab and Settings tab planner fields in sync in both directions.
+document.getElementById("fromInput").addEventListener("input", (e)=>{
+  document.getElementById("fromInputSettings").value = e.target.value;
+});
+document.getElementById("toInput").addEventListener("input", (e)=>{
+  document.getElementById("toInputSettings").value = e.target.value;
+});
+document.getElementById("fromInputSettings").addEventListener("input", (e)=>{
+  document.getElementById("fromInput").value = e.target.value;
+});
+document.getElementById("toInputSettings").addEventListener("input", (e)=>{
+  document.getElementById("toInput").value = e.target.value;
+});
+
+document.getElementById("planTripBtnSettings").addEventListener("click", planTrip);
+document.getElementById("useCurrentAsFromBtnSettings").addEventListener("click", async ()=>{
+  document.getElementById("fromInput").value = "";
+  document.getElementById("fromInputSettings").value = "";
+  setTripStatus("From set to your current location — tap Recalculate route.");
+});
+
+
+/* ---------------- Live clock ---------------- */
+const COMMON_TIMEZONES = [
+  "Africa/Lagos","Africa/Cairo","Africa/Johannesburg","Africa/Nairobi",
+  "Europe/London","Europe/Paris","Europe/Berlin","Europe/Moscow",
+  "America/New_York","America/Chicago","America/Denver","America/Los_Angeles","America/Sao_Paulo",
+  "Asia/Dubai","Asia/Kolkata","Asia/Shanghai","Asia/Tokyo","Asia/Singapore",
+  "Australia/Sydney","Pacific/Auckland","UTC"
+];
+
+function populateTimezoneSelect(){
+  const select = document.getElementById("timezoneSelect");
+  let zones = COMMON_TIMEZONES;
+  try{
+    if(typeof Intl.supportedValuesOf === "function"){
+      zones = Intl.supportedValuesOf("timeZone");
+    }
+  }catch(_e){ /* fall back to the curated list above */ }
+
+  select.innerHTML = zones.map(z => `<option value="${z}">${z.replace(/_/g," ")}</option>`).join("");
+  select.value = state.timezone;
+  if(select.value !== state.timezone){
+    // Chosen default isn't in this browser's list for some reason — fall back safely.
+    state.timezone = select.options[0].value;
+    select.value = state.timezone;
+  }
+}
+populateTimezoneSelect();
+
+function setTimeInputValue(h, m){
+  document.getElementById("timeInput").value = `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`;
+}
+
+function tickClock(){
+  const clockEl = document.getElementById("liveClock");
+  if(state.useLiveClock){
+    const t = getNowInZone(state.timezone);
+    if(clockEl) clockEl.textContent = `${String(t.hour).padStart(2,"0")}:${String(t.minute).padStart(2,"0")}:${String(t.second).padStart(2,"0")}`;
+    if(t.hour !== state.hour || t.minute !== state.minute || t.weekday !== state.weekday){
+      state.hour = t.hour;
+      state.minute = t.minute;
+      state.weekday = t.weekday;
+      setTimeInputValue(state.hour, state.minute);
+      document.getElementById("daySelect").value = state.weekday;
+      renderAll();
+    }
+  } else if(clockEl){
+    clockEl.textContent = `${String(state.hour).padStart(2,"0")}:${String(state.minute).padStart(2,"0")} · manual`;
+  }
+}
+setInterval(tickClock, 1000);
+setTimeInputValue(state.hour, state.minute);
+document.getElementById("daySelect").value = state.weekday;
+tickClock();
+
+document.getElementById("timezoneSelect").addEventListener("change", (e)=>{
+  state.timezone = e.target.value;
+  if(state.useLiveClock) tickClock();
+});
+
+document.getElementById("timeInput").addEventListener("input", (e)=>{
+  const [h, m] = e.target.value.split(":").map(Number);
+  if(Number.isNaN(h) || Number.isNaN(m)) return;
+  state.hour = h;
+  state.minute = m;
+  renderAll();
+});
+
+document.getElementById("liveClockSwitch").addEventListener("click", (e)=>{
+  state.useLiveClock = !state.useLiveClock;
+  e.currentTarget.classList.toggle("on", state.useLiveClock);
+  const hourCard = document.getElementById("hourCard");
+  hourCard.style.opacity = state.useLiveClock ? "0.45" : "1";
+  document.getElementById("timeInput").disabled = state.useLiveClock;
+  document.getElementById("daySelect").disabled = state.useLiveClock;
+  if(state.useLiveClock){
+    tickClock();
+  } else {
+    setTimeInputValue(state.hour, state.minute);
+    renderAll();
+  }
+});
+document.getElementById("hourCard").style.opacity = state.useLiveClock ? "0.45" : "1";
+document.getElementById("timeInput").disabled = state.useLiveClock;
+document.getElementById("daySelect").disabled = state.useLiveClock;
+
+/* ---------------- Sign-in ---------------- */
+function initialsFor(name){
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if(!parts.length) return "?";
+  return (parts[0][0] + (parts[1] ? parts[1][0] : "")).toUpperCase();
+}
+
+function completeSignIn(name, source){
+  state.user = { name, source, initials: initialsFor(name) };
+  document.getElementById("avatarInitials").textContent = state.user.initials;
+  document.getElementById("avatarName").textContent = name.split(" ")[0];
+  document.getElementById("avatarChip").style.display = "flex";
+  const overlay = document.getElementById("signinOverlay");
+  overlay.style.transition = "opacity 0.3s ease";
+  overlay.style.opacity = "0";
+  setTimeout(()=>{ overlay.style.display = "none"; }, 300);
+}
+
+document.getElementById("googleSigninBtn").addEventListener("click", ()=>{
+  document.getElementById("googleForm").classList.add("active");
+  document.getElementById("phoneForm").classList.remove("active");
+});
+document.getElementById("googleContinueBtn").addEventListener("click", ()=>{
+  const name = document.getElementById("googleNameInput").value.trim();
+  const email = document.getElementById("googleEmailInput").value.trim();
+  if(!name || !email){
+    document.getElementById("googleStatus").textContent = "Enter a name and email to continue.";
+    return;
+  }
+  completeSignIn(name, "Google");
+});
+
+document.getElementById("showPhoneFormBtn").addEventListener("click", ()=>{
+  document.getElementById("phoneForm").classList.add("active");
+  document.getElementById("googleForm").classList.remove("active");
+});
+
+let generatedOtp = null;
+document.getElementById("sendCodeBtn").addEventListener("click", ()=>{
+  const phone = document.getElementById("phoneInput").value.trim();
+  if(!phone){
+    document.getElementById("signinStatus").textContent = "Enter a phone number first.";
+    return;
+  }
+  generatedOtp = String(Math.floor(100000 + Math.random()*900000));
+  document.getElementById("otpStep").style.display = "block";
+  document.getElementById("signinStatus").textContent =
+    `Demo code: ${generatedOtp} (real SMS delivery needs a backend like Firebase Phone Auth)`;
+});
+document.getElementById("verifyCodeBtn").addEventListener("click", ()=>{
+  const entered = document.getElementById("otpInput").value.trim();
+  const phone = document.getElementById("phoneInput").value.trim();
+  if(entered === generatedOtp){
+    completeSignIn(phone, "Phone");
+  } else {
+    document.getElementById("signinStatus").textContent = "That code doesn't match — check and try again.";
+  }
+});
+
+document.getElementById("skipSigninBtn").addEventListener("click", ()=>{
+  completeSignIn("Guest", "Guest");
+});
+
+document.getElementById("avatarChip").addEventListener("click", ()=>{
+  state.user = null;
+  document.getElementById("avatarChip").style.display = "none";
+  const overlay = document.getElementById("signinOverlay");
+  overlay.style.display = "flex";
+  requestAnimationFrame(()=>{ overlay.style.opacity = "1"; });
+  document.getElementById("googleForm").classList.remove("active");
+  document.getElementById("phoneForm").classList.remove("active");
+  document.getElementById("otpStep").style.display = "none";
+});
+
+renderAll();
+</script>
+</body>
+</html>
